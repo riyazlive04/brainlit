@@ -5,8 +5,8 @@
 CREATE TABLE registrations (
   id BIGSERIAL PRIMARY KEY,
   parent_name TEXT NOT NULL,
-  whatsapp TEXT NOT NULL,
-  email TEXT NOT NULL,
+  whatsapp TEXT NOT NULL UNIQUE,
+  email TEXT NOT NULL UNIQUE,
   location TEXT NOT NULL,
   registered_at TIMESTAMPTZ NOT NULL,
   created_at TIMESTAMPTZ DEFAULT NOW()
@@ -21,7 +21,13 @@ CREATE POLICY "Allow public inserts" ON registrations
   TO anon
   WITH CHECK (true);
 
--- Create a policy to allow reads for authenticated users only (optional - for admin access)
+-- Create a policy to allow reads for anonymous users (admin dashboard uses anon key)
+CREATE POLICY "Allow anon reads" ON registrations
+  FOR SELECT
+  TO anon
+  USING (true);
+
+-- Create a policy to allow reads for authenticated users
 CREATE POLICY "Allow authenticated reads" ON registrations
   FOR SELECT
   TO authenticated

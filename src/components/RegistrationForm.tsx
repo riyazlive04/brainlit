@@ -54,6 +54,38 @@ export function RegistrationForm() {
     }
 
     try {
+      // Check for duplicate WhatsApp
+      const { data: whatsappCheck } = await supabase
+        .from('registrations')
+        .select('whatsapp')
+        .eq('whatsapp', result.data.whatsapp)
+        .limit(1);
+
+      if (whatsappCheck && whatsappCheck.length > 0) {
+        toast.error("WhatsApp Number Already Registered!", {
+          description: "This WhatsApp number is already registered. Please use a different number.",
+        });
+        setErrors({ whatsapp: "This number is already registered" });
+        setIsSubmitting(false);
+        return;
+      }
+
+      // Check for duplicate Email
+      const { data: emailCheck } = await supabase
+        .from('registrations')
+        .select('email')
+        .eq('email', result.data.email)
+        .limit(1);
+
+      if (emailCheck && emailCheck.length > 0) {
+        toast.error("Email Already Registered!", {
+          description: "This email is already registered. Please use a different email.",
+        });
+        setErrors({ email: "This email is already registered" });
+        setIsSubmitting(false);
+        return;
+      }
+
       // Submit to Supabase
       const { error } = await supabase.from('registrations').insert({
         parent_name: result.data.parentName,
@@ -64,6 +96,14 @@ export function RegistrationForm() {
       });
 
       if (error) {
+        // Handle duplicate constraint error from database level
+        if (error.code === '23505') {
+          toast.error("Already Registered!", {
+            description: "This WhatsApp number or email is already registered.",
+          });
+          setIsSubmitting(false);
+          return;
+        }
         throw error;
       }
 
@@ -97,11 +137,19 @@ export function RegistrationForm() {
       });
 
       setFormData({ parentName: "", whatsapp: "", email: "", location: "" });
-    } catch (error) {
+    } catch (error: any) {
       console.error("Submission error:", error);
-      toast.error("Registration failed", {
-        description: "Please try again or contact support.",
-      });
+      
+      // More friendly error messages
+      if (error.message?.includes("verify registration")) {
+        toast.error("Connection Error", {
+          description: error.message,
+        });
+      } else {
+        toast.error("Registration failed", {
+          description: "Please try again or contact support.",
+        });
+      }
     } finally {
       setIsSubmitting(false);
     }
