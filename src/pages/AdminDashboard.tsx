@@ -11,6 +11,13 @@ import {
 } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectTrigger,
+  SelectContent,
+  SelectItem,
+  SelectValue,
+} from "@/components/ui/select";
 import { supabase, Registration, WebinarSettings } from "@/lib/supabase";
 import { toast } from "sonner";
 import { Helmet } from "react-helmet";
@@ -20,12 +27,23 @@ const AdminDashboard = () => {
   const [registrations, setRegistrations] = useState<Registration[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [webinarDate, setWebinarDate] = useState<string>("");
+  const [meetingLink, setMeetingLink] = useState<string>("");
   const [isSavingDate, setIsSavingDate] = useState(false);
+
+  // filter/group by webinar date ('all' means no filter)
+  const [filterDate, setFilterDate] = useState<string>("all");
 
   useEffect(() => {
     fetchRegistrations();
     fetchWebinarSettings();
   }, []);
+
+  // when webinarDate is retrieved, use it as default filter
+  useEffect(() => {
+    if (webinarDate) {
+      setFilterDate(webinarDate);
+    }
+  }, [webinarDate]);
 
   const fetchRegistrations = async () => {
     setIsLoading(true);
@@ -35,9 +53,14 @@ const AdminDashboard = () => {
       const { data, error } = await supabase
         .from("registrations")
         .select("*")
+        .order("webinar_date", { ascending: false })
         .order("registered_at", { ascending: false });
 
       console.log("Supabase response:", { data, error });
+      if (data && data.length > 0) {
+        console.log("first registration object", data[0]);
+        console.log("registration keys", Object.keys(data[0]));
+      }
 
       if (error) {
         console.error("Supabase error details:", error);
@@ -78,6 +101,9 @@ const AdminDashboard = () => {
         const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
         setWebinarDate(localDate.toISOString().slice(0, 16));
       }
+      if (data?.meeting_link) {
+        setMeetingLink(data.meeting_link);
+      }
     } catch (error: any) {
       console.error("Error fetching webinar settings:", error);
     }
@@ -89,9 +115,8 @@ const AdminDashboard = () => {
       return;
     }
 
-    setIsSavingDate(true);
+    // meetingLink may be empty string; that's okay
     try {
-      // Check if a settings row exists
       const { data: existing } = await supabase
         .from("webinar_settings")
         .select("*")
@@ -106,6 +131,7 @@ const AdminDashboard = () => {
           .from("webinar_settings")
           .update({ 
             next_webinar_date: dateToSave,
+            meeting_link: meetingLink,
             updated_at: new Date().toISOString()
           })
           .eq("id", existing.id);
@@ -117,6 +143,7 @@ const AdminDashboard = () => {
           .from("webinar_settings")
           .insert({ 
             next_webinar_date: dateToSave,
+            meeting_link: meetingLink,
             updated_at: new Date().toISOString()
           });
 
@@ -129,6 +156,50 @@ const AdminDashboard = () => {
       toast.error(`Failed to save webinar date: ${error.message}`);
     } finally {
       setIsSavingDate(false);
+    }
+  };
+
+  // delete a registration (lead) by id
+  const handleDelete = async (id: number | string | undefined) => {
+    console.log("handleDelete invoked with id", id);
+    if (id == null) {
+      console.error("handleDelete called without id", id);
+      toast.error("Unable to delete: missing registration ID");
+      return;
+    }
+
+    const proceed = window.confirm("Are you sure you want to delete this registration? This cannot be undone.");
+    if (!proceed) return;
+
+    try {
+      const response = await supabase
+        .from("registrations")
+        .delete()
+        // always use the `id` column; its type may be uuid
+        .eq("id", id as any)
+        // ask for rows back so we can verify
+        .select();
+
+      console.log("delete response", response);
+
+      if (response.error) {
+        throw response.error;
+      }
+
+      if (!response.data || response.data.length === 0) {
+        toast.error("No record was removed. Check database permissions or ID.");
+        // fetch registrations anyway to see true state
+        fetchRegistrations();
+        return;
+      }
+
+      toast.success("Registration deleted.");
+      // update local state then re-sync with server
+      setRegistrations((prev) => prev.filter((r) => r.id !== id));
+      fetchRegistrations();
+    } catch (error: any) {
+      console.error("Error deleting registration:", error);
+      toast.error(`Failed to delete registration: ${error.message}`);
     }
   };
 
@@ -147,7 +218,7 @@ const AdminDashboard = () => {
   };
 
   const exportToCSV = () => {
-    const headers = ["ID", "Parent Name", "WhatsApp", "Email", "Location", "Registered At"];
+    const headers = ["ID", "Parent Name", "WhatsApp", "Email", "Location", "Registered At", "Webinar Date", "Meeting Link"];
     const csvData = registrations.map((reg) => [
       reg.id,
       reg.parent_name,
@@ -155,6 +226,8 @@ const AdminDashboard = () => {
       reg.email,
       reg.location,
       reg.registered_at,
+      reg.webinar_date,
+      reg.meeting_link || "",
     ]);
 
     const csvContent = [
@@ -201,6 +274,15 @@ const AdminDashboard = () => {
                     type="datetime-local"
                     value={webinarDate}
                     onChange={(e) => setWebinarDate(e.target.value)}
+                    className="h-12"
+                  />
+                  <Label htmlFor="meetingLink" className="mt-4">Meeting Link (URL)</Label>
+                  <Input
+                    id="meetingLink"
+                    type="url"
+                    placeholder="https://..."
+                    value={meetingLink}
+                    onChange={(e) => setMeetingLink(e.target.value)}
                     className="h-12"
                   />
                 </div>
@@ -266,36 +348,114 @@ const AdminDashboard = () => {
                 <p className="text-muted-foreground">No registrations found</p>
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-[60px]">ID</TableHead>
-                      <TableHead>Parent Name</TableHead>
-                      <TableHead>WhatsApp</TableHead>
-                      <TableHead>Email</TableHead>
-                      <TableHead>Location</TableHead>
-                      <TableHead>Registered At</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {registrations.map((registration) => (
-                      <TableRow key={registration.id}>
-                        <TableCell className="font-medium">{registration.id}</TableCell>
-                        <TableCell>{registration.parent_name}</TableCell>
-                        <TableCell>{registration.whatsapp}</TableCell>
-                        <TableCell className="max-w-[200px] truncate">
-                          {registration.email}
-                        </TableCell>
-                        <TableCell>{registration.location}</TableCell>
-                        <TableCell className="whitespace-nowrap">
-                          {formatDate(registration.registered_at)}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
+              <>
+                {/* filter by webinar date */}
+                <div className="mb-4 flex items-center gap-4">
+                  <Label htmlFor="filterDate" className="text-sm font-medium">
+                    Show webinar:
+                  </Label>
+                  <Select
+                    value={filterDate}
+                    onValueChange={(val) => setFilterDate(val)}
+                  >
+                    <SelectTrigger className="max-w-xs">
+                      <SelectValue placeholder="All dates" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All dates</SelectItem>
+                      {Array.from(
+                        new Set(registrations.map((r) => r.webinar_date).filter(Boolean as any))
+                      )
+                        .sort((a, b) =>
+                          new Date(b).getTime() - new Date(a).getTime()
+                        )
+                        .map((date) => (
+                          <SelectItem key={date} value={date}>
+                            {new Date(date).toLocaleDateString("en-IN", {
+                              year: "numeric",
+                              month: "short",
+                              day: "numeric",
+                            })}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* group by date */}
+                {Object.entries(
+                  registrations.reduce<Record<string, Registration[]>>((acc, reg) => {
+                    const key = reg.webinar_date || "Unknown";
+                    if (!acc[key]) acc[key] = [];
+                    acc[key].push(reg);
+                    return acc;
+                  }, {})
+                )
+                  .filter(([date]) => filterDate === "all" || date === filterDate)
+                  .map(([date, group]) => (
+                    <div key={date} className="mb-8">
+                      <p className="text-lg font-semibold mb-2">
+                        Webinar: {new Date(date).toLocaleString("en-IN", {
+                          year: "numeric",
+                          month: "long",
+                          day: "numeric",
+                        })}
+                      </p>
+                      <div className="overflow-x-auto">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead className="w-[60px]">ID</TableHead>
+                              <TableHead>Parent Name</TableHead>
+                              <TableHead>WhatsApp</TableHead>
+                              <TableHead>Email</TableHead>
+                              <TableHead>Location</TableHead>
+                              <TableHead>Meeting Link</TableHead>
+                              <TableHead>Registered At</TableHead>
+                              <TableHead className="w-[100px]">Actions</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {group.map((registration) => (
+                              <TableRow key={registration.id}>
+                                <TableCell className="font-medium">
+                                  {registration.id}
+                                </TableCell>
+                                <TableCell>{registration.parent_name}</TableCell>
+                                <TableCell>{registration.whatsapp}</TableCell>
+                                <TableCell className="max-w-[200px] truncate">
+                                  {registration.email}
+                                </TableCell>
+                                <TableCell>{registration.location}</TableCell>
+                                <TableCell className="max-w-[200px] truncate">
+                                  {registration.meeting_link ? (
+                                    <a href={registration.meeting_link} target="_blank" rel="noopener noreferrer" className="text-secondary underline">
+                                      Link
+                                    </a>
+                                  ) : (
+                                    ""
+                                  )}
+                                </TableCell>
+                                <TableCell className="whitespace-nowrap">
+                                  {formatDate(registration.registered_at)}
+                                </TableCell>
+                                <TableCell>
+                                  <Button
+                                    variant="destructive"
+                                    size="sm"
+                                    onClick={() => handleDelete(registration.id)}
+                                  >
+                                    Delete
+                                  </Button>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </div>
+                  ))}
+              </>
             )}
           </CardContent>
         </Card>

@@ -78,7 +78,20 @@ For detailed instructions including database setup and environment configuration
 - **Admin Dashboard**: Secure login with session management
 - **Webinar Management**: Set and display upcoming webinar dates
 - **Data Export**: Export registrations to CSV
+- **Filtering**: Admin dashboard can filter and group registrations by webinar date
+- **Deletion**: To allow the delete button to remove rows, the database must have a
+  policy permitting deletes via the anon key (see `supabase-fix-admin-access.sql`).
+- **Webinar date values**: When `webinar_date` was added the column defaulted to
+  `NOW()` so existing registrations all received the timestamp of the migration.
+  That means old entries will appear under the "new" webinar; adjust them manually
+  with an `UPDATE` if you have the correct dates. New submissions capture whatever
+  value was active when the form is submitted; to avoid stale data the form now
+  refetches the current date just before inserting.
+- **Primary key column**: some deployments use a `uuid` column instead of an
+  integer `id` for registrations. The admin dashboard accepts either and will
+  delete using whichever field is present (it also labels columns "UUID/ID").
 - **Webhook Integration**: Automatic notifications via n8n
+- **Meeting link**: Admin can set a meeting URL alongside the webinar date; it is stored in the database, shown on the registration form, included in webhook payloads, and saved per‑registration for recordkeeping.
 - **Database**: Supabase integration with Row Level Security
 
 ## Environment Variables

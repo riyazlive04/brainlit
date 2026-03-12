@@ -35,6 +35,8 @@ export function RegistrationForm() {
   const [errors, setErrors] = useState<Partial<Record<keyof FormData, string>>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [webinarDate, setWebinarDate] = useState<string | null>(null);
+  const [meetingLink, setMeetingLink] = useState<string | null>(null);
+  const [webhookSent, setWebhookSent] = useState(false); // guard redundant POSTs
 
   useEffect(() => {
     fetchWebinarDate();
@@ -44,7 +46,7 @@ export function RegistrationForm() {
     try {
       const { data, error } = await supabase
         .from("webinar_settings")
-        .select("next_webinar_date")
+        .select("next_webinar_date, meeting_link")
         .limit(1)
         .single();
 
@@ -56,6 +58,9 @@ export function RegistrationForm() {
       if (data?.next_webinar_date) {
         setWebinarDate(data.next_webinar_date);
       }
+      if (data?.meeting_link) {
+        setMeetingLink(data.meeting_link);
+      }
     } catch (error) {
       console.error("Error fetching webinar date:", error);
     }
@@ -66,12 +71,19 @@ export function RegistrationForm() {
     if (errors[field]) {
       setErrors((prev) => ({ ...prev, [field]: undefined }));
     }
+    // if user starts editing again, allow a fresh webhook on next submit
+    if (webhookSent) {
+      setWebhookSent(false);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
     setErrors({});
+
+    // refresh webinar date right before we insert, in case admin changed it
+    await fetchWebinarDate();
 
     const result = formSchema.safeParse(formData);
 
@@ -120,13 +132,23 @@ export function RegistrationForm() {
       }
 
       // Submit to Supabase
-      const { error } = await supabase.from('registrations').insert({
+      // build payload and only include webinar_date if we have one to avoid
+      // errors when the column hasn't been added to the database yet
+      const payload: Record<string, any> = {
         parent_name: result.data.parentName,
         whatsapp: result.data.whatsapp,
         email: result.data.email,
         location: result.data.location,
         registered_at: new Date().toISOString(),
-      });
+        // always send the link field so the webhook receiver can see it
+        meeting_link: meetingLink || "",
+      };
+      if (webinarDate) {
+        // webinarDate will have been updated immediately prior to submit
+        payload.webinar_date = webinarDate;
+      }
+
+      const { error } = await supabase.from('registrations').insert(payload);
 
       if (error) {
         // Handle duplicate constraint error from database level
@@ -140,25 +162,30 @@ export function RegistrationForm() {
         throw error;
       }
 
-      // Trigger webhook
-      try {
-        await fetch('https://n8n.srv930949.hstgr.cloud/webhook/brainlit-bootcamp', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            parentName: result.data.parentName,
-            whatsapp: result.data.whatsapp,
-            email: result.data.email,
-            location: result.data.location,
-            registeredAt: new Date().toISOString(),
-            webinarDate: webinarDate,
-          }),
-        });
-      } catch (webhookError) {
-        console.error("Webhook error:", webhookError);
-        // Don't fail the submission if webhook fails
+      // Trigger webhook exactly once per form mount/submission
+      if (!webhookSent) {
+        setWebhookSent(true);
+        try {
+          const resp = await fetch('https://n8n.srv930949.hstgr.cloud/webhook/brainlit-bootcamp', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              parentName: result.data.parentName,
+              whatsapp: result.data.whatsapp,
+              email: result.data.email,
+              location: result.data.location,
+              registeredAt: new Date().toISOString(),
+              webinarDate: webinarDate,
+              meetingLink: meetingLink || "",
+            }),
+          });
+          console.log('webhook response', resp.status, resp.statusText);
+        } catch (webhookError) {
+          console.error("Webhook error:", webhookError);
+          // Don't fail the submission if webhook fails
+        }
       }
 
       // Save to localStorage as backup
@@ -180,7 +207,8 @@ export function RegistrationForm() {
 
       setFormData({ parentName: "", whatsapp: "", email: "", location: "" });
     } catch (error: any) {
-      console.error("Submission error:", error);
+      // log full error details for diagnostics
+      console.error("Submission error:", error, JSON.stringify(error));
       
       // More friendly error messages
       if (error.message?.includes("verify registration")) {

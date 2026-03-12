@@ -5,6 +5,7 @@
 CREATE TABLE webinar_settings (
   id BIGSERIAL PRIMARY KEY,
   next_webinar_date TIMESTAMPTZ NOT NULL,
+  meeting_link TEXT DEFAULT '',
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -31,8 +32,9 @@ CREATE POLICY "Allow anon updates" ON webinar_settings
   WITH CHECK (true);
 
 -- Insert a default webinar date (you can change this)
-INSERT INTO webinar_settings (next_webinar_date) 
-VALUES (NOW() + INTERVAL '7 days');
+-- leave meeting_link blank initially
+INSERT INTO webinar_settings (next_webinar_date, meeting_link) 
+VALUES (NOW() + INTERVAL '7 days', '');
 
 -- Note: This table will only have one row.
 -- The admin dashboard will update this single row.
