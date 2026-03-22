@@ -315,7 +315,7 @@ const AdminDashboard = () => {
               <div>
                 <CardTitle className="text-2xl md:text-3xl font-bold">Admin Dashboard</CardTitle>
                 <CardDescription className="mt-2">
-                  Manage webinar registrations ({registrations.length} total)
+                  Manage webinar registrations ({filterDate === "all" ? registrations.length : registrations.filter((r) => r.webinar_date === filterDate).length} total)
                 </CardDescription>
               </div>
               <div className="flex gap-2">
